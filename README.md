@@ -1,4 +1,4 @@
-# Reddit Aggregator
+# Reddit Terminal
 
 ![IMAGE](misc/screenshot.png)
 
