@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  reddit-api:
+    image: 192.168.7.1:5000/reddit_aggr_be:0.0.1
+    ports:
+      - '3001:3001'
+    environment:
+      - PORT=3001
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3001/subreddits']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    image: 192.168.7.1:5000/reddit_agggr_fe:0.0.1
+    ports:
+      - '3000:3000'
+    environment:
+      - NEXT_PUBLIC_API_URL=http://reddit-api:3001
+    depends_on:
+      - reddit-api
+    restart: unless-stopped
