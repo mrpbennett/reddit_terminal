@@ -1,6 +1,12 @@
 # Reddit Terminal
 
+## Posts listed in frequency order
+
 ![IMAGE](misc/screenshot.png)
+
+## Comments open on the right
+
+![IMAGE](misc/comments.png)
 
 ### Tied of Ads or posts that Reddit thinks you may like? Me too.
 

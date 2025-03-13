@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react'
+import ReactMarkdown from 'react-markdown'
 
 // Custom hook to prevent hydration mismatch
 function useClientOnly() {
@@ -60,6 +61,76 @@ function parseTimeValue(timeValue) {
   }
 }
 
+// Function to make external links safe
+const linkRenderer = ({href, children}) => (
+  <a
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="text-amber-500 hover:underline"
+  >
+    {children}
+  </a>
+)
+
+// Comment component that recursively renders itself and its replies
+const Comment = ({comment, depth = 0}) => {
+  const maxDepth = 5 // Prevent excessive nesting
+  const indentSize = 20 // Indent size for nested comments
+
+  return (
+    <div className="font-mono text-xs mb-3">
+      {/* Comment content with simple indentation */}
+      <div
+        className="relative"
+        style={{
+          marginLeft: depth * indentSize,
+        }}
+      >
+        {/* Comment content */}
+        <div className="bg-gray-800 rounded p-3 border-l-2 border-gray-700">
+          <div className="text-gray-400 mb-2 flex justify-between items-center">
+            <span className="font-bold text-amber-500">{comment.author}</span>
+            <span className="text-xs">
+              {comment.time_ago || 'unknown time'}
+            </span>
+          </div>
+          <div className="text-white markdown-body">
+            <ReactMarkdown
+              components={{
+                a: linkRenderer,
+                p: ({node, ...props}) => <p className="mb-1" {...props} />,
+              }}
+            >
+              {comment.body}
+            </ReactMarkdown>
+          </div>
+        </div>
+      </div>
+
+      {/* Render replies if they exist and we're not at max depth */}
+      {comment.replies && comment.replies.length > 0 && depth < maxDepth && (
+        <div className="mt-2">
+          {comment.replies.map((reply, i) => (
+            <Comment key={reply.id || i} comment={reply} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+
+      {/* Show a "more replies" indicator if we've hit max depth but there are more */}
+      {comment.replies && comment.replies.length > 0 && depth >= maxDepth && (
+        <div
+          className="mt-2 p-2 bg-gray-800 rounded text-gray-400 text-xs italic"
+          style={{marginLeft: (depth + 1) * indentSize}}
+        >
+          {comment.replies.length} more{' '}
+          {comment.replies.length === 1 ? 'reply' : 'replies'} ↓
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Home() {
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -69,15 +140,32 @@ export default function Home() {
   // New state for selected post and comments
   const [selectedPost, setSelectedPost] = useState(null)
   const [loadingComments, setLoadingComments] = useState(false)
+  // Add last click tracking to prevent rapid clicks
+  const [lastClickTime, setLastClickTime] = useState(0)
+  const CLICK_COOLDOWN = 3000 // 3 seconds cooldown between clicks
 
+  // Update the main data fetching function to also implement rate limiting
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchData = async (retryCount = 0) => {
+      const MAX_RETRIES = 3
+      const RETRY_DELAY = 3000 // 3 seconds
+
       try {
         setLoading(true)
         // Make sure this path is correct - it should match what's in your API route
         const response = await fetch('/api/subreddits')
 
         console.log('response', response)
+
+        // Handle rate limiting
+        if (response.status === 429 && retryCount < MAX_RETRIES) {
+          console.log(
+            `Rate limit reached. Retrying in ${RETRY_DELAY / 1000} seconds...`,
+          )
+          // Wait and then retry
+          setTimeout(() => fetchData(retryCount + 1), RETRY_DELAY)
+          return
+        }
 
         if (!response.ok) {
           throw new Error(`HTTP error! Status: ${response.status}`)
@@ -98,6 +186,7 @@ export default function Home() {
             title: post.title,
             author: post.author,
             permalink: post.permalink,
+            comments: post.comments,
           }
         })
 
@@ -147,8 +236,11 @@ export default function Home() {
     }
   }, [isClient])
 
-  // Function to fetch post details and comments
-  const fetchPostDetails = async permalink => {
+  // Updated function to fetch post details with better retry logic
+  const fetchPostDetails = async (permalink, retryCount = 0) => {
+    const MAX_RETRIES = 5 // Increase max retries
+    const RETRY_DELAY = 5000 // Increase delay to 5 seconds
+
     try {
       setLoadingComments(true)
       setError(null) // Clear any previous errors
@@ -159,6 +251,27 @@ export default function Home() {
       )
 
       console.log('Response status:', response.status)
+
+      // Handle rate limiting
+      if (response.status === 429) {
+        const retryAfter =
+          parseInt(response.headers.get('Retry-After'), 10) * 1000 ||
+          RETRY_DELAY
+
+        if (retryCount < MAX_RETRIES) {
+          const waitTime = Math.max(retryAfter, RETRY_DELAY * (retryCount + 1))
+          setError(
+            `Rate limit reached. Retrying in ${Math.ceil(
+              waitTime / 1000,
+            )} seconds...`,
+          )
+          // Wait and then retry with exponential backoff
+          await new Promise(resolve => setTimeout(resolve, waitTime))
+          return fetchPostDetails(permalink, retryCount + 1)
+        } else {
+          throw new Error('Rate limit exceeded. Please try again later.')
+        }
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
@@ -179,9 +292,22 @@ export default function Home() {
     }
   }
 
-  // Function to handle post click
+  // Updated function to handle post click with cooldown
   const handlePostClick = (e, permalink) => {
     e.preventDefault()
+
+    const now = Date.now()
+    if (now - lastClickTime < CLICK_COOLDOWN) {
+      console.log(
+        `Click cooldown active. Please wait ${
+          CLICK_COOLDOWN / 1000
+        }s between clicks.`,
+      )
+      setError(`Please wait a moment before clicking another post.`)
+      return
+    }
+
+    setLastClickTime(now)
     fetchPostDetails(permalink)
   }
 
@@ -223,7 +349,8 @@ export default function Home() {
               <div className="grid grid-cols-12 bg-gray-800 text-xs font-mono font-bold text-gray-400 p-2">
                 <div className="col-span-1">TIME</div>
                 <div className="col-span-2">SUBREDDIT</div>
-                <div className="col-span-7">TITLE</div>
+                <div className="col-span-5">TITLE</div>
+                <div className="col-span-2 text-center">COMMENTS</div>
                 <div className="col-span-2">AUTHOR</div>
               </div>
 
@@ -241,7 +368,7 @@ export default function Home() {
                         <div className="col-span-2 text-amber-500">
                           {post.subreddit}
                         </div>
-                        <div className="col-span-7 text-white font-medium truncate">
+                        <div className="col-span-5 text-white font-medium truncate">
                           <a
                             href={post.permalink}
                             onClick={e => handlePostClick(e, post.permalink)}
@@ -249,6 +376,9 @@ export default function Home() {
                           >
                             {post.title}
                           </a>
+                        </div>
+                        <div className="col-span-2 text-gray-500 text-center">
+                          {post.comments}
                         </div>
                         <div className="col-span-2 text-gray-500">
                           {post.author}
@@ -274,7 +404,12 @@ export default function Home() {
                 {/* Post detail header */}
                 <div className="bg-gray-800 p-3 flex justify-between items-center">
                   <h2 className="text-amber-500 font-mono font-bold text-lg truncate">
-                    <a href={selectedPost.url} className="hover:underline">
+                    <a
+                      href={selectedPost.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                    >
                       {selectedPost.title}
                     </a>
                   </h2>
@@ -298,8 +433,61 @@ export default function Home() {
                       Loading content...
                     </p>
                   ) : (
-                    <div className="text-white font-mono text-sm whitespace-pre-wrap mt-2">
-                      {selectedPost.selftext || 'No text content available'}
+                    <div className="text-white font-mono text-sm mt-2 markdown-body">
+                      {selectedPost.selftext ? (
+                        <ReactMarkdown
+                          components={{
+                            a: linkRenderer,
+                            // Style other elements as needed
+                            p: ({node, ...props}) => (
+                              <p className="mb-2" {...props} />
+                            ),
+                            h1: ({node, ...props}) => (
+                              <h1
+                                className="text-xl font-bold mb-2"
+                                {...props}
+                              />
+                            ),
+                            h2: ({node, ...props}) => (
+                              <h2
+                                className="text-lg font-bold mb-2"
+                                {...props}
+                              />
+                            ),
+                            ul: ({node, ...props}) => (
+                              <ul className="list-disc pl-5 mb-2" {...props} />
+                            ),
+                            ol: ({node, ...props}) => (
+                              <ol
+                                className="list-decimal pl-5 mb-2"
+                                {...props}
+                              />
+                            ),
+                            blockquote: ({node, ...props}) => (
+                              <blockquote
+                                className="border-l-4 border-gray-500 pl-2 italic my-2"
+                                {...props}
+                              />
+                            ),
+                            code: ({node, ...props}) => (
+                              <code
+                                className="bg-gray-800 px-1 rounded"
+                                {...props}
+                              />
+                            ),
+                            pre: ({node, ...props}) => (
+                              <pre
+                                className="bg-gray-800 p-2 rounded my-2 overflow-x-auto"
+                                {...props}
+                              />
+                            ),
+                          }}
+                        >
+                          {selectedPost.selftext}
+                        </ReactMarkdown>
+                      ) : (
+                        'No text content available'
+                      )}
                     </div>
                   )}
                 </div>
@@ -316,20 +504,13 @@ export default function Home() {
                     </p>
                   ) : selectedPost.comments &&
                     selectedPost.comments.length > 0 ? (
-                    <div className="space-y-3 max-h-80 overflow-y-auto">
+                    <div className="space-y-3 max-h-[calc(100vh-300px)] overflow-y-auto">
                       {selectedPost.comments.map((comment, i) => (
-                        <div
-                          key={i}
-                          className="font-mono text-xs border-l-2 border-gray-700 pl-2"
-                        >
-                          <div className="text-gray-500 mb-1">
-                            {comment.author} •{' '}
-                            {comment.time_ago || 'unknown time'}
-                          </div>
-                          <div className="text-white whitespace-pre-wrap">
-                            {comment.body}
-                          </div>
-                        </div>
+                        <Comment
+                          key={comment.id || i}
+                          comment={comment}
+                          depth={0}
+                        />
                       ))}
                     </div>
                   ) : (

@@ -44,9 +44,15 @@ let isProcessingQueue = false
 function timeAgo(utcSeconds) {
   const now = Math.floor(Date.now() / 1000)
   const diff = now - utcSeconds
-  if (diff < 60) return `${diff} seconds ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`
+  if (diff < 60) {
+    return `${diff} seconds ago`
+  }
+  if (diff < 3600) {
+    return `${Math.floor(diff / 60)} minutes ago`
+  }
+  if (diff < 86400) {
+    return `${Math.floor(diff / 3600)} hours ago`
+  }
   return `${Math.floor(diff / 86400)} days ago`
 }
 
@@ -84,6 +90,7 @@ async function fetchSubreddit(subreddit) {
         author: post.data.author,
         time_ago: timeAgo(post.data.created_utc),
         subreddit: subreddit,
+        comments: post.data.num_comments,
       }))
     }
     return []
@@ -94,7 +101,9 @@ async function fetchSubreddit(subreddit) {
 }
 
 async function processQueue() {
-  if (isProcessingQueue || requestQueue.length === 0) return
+  if (isProcessingQueue || requestQueue.length === 0) {
+    return
+  }
 
   isProcessingQueue = true
 
