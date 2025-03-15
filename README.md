@@ -8,7 +8,7 @@
 
 ![IMAGE](misc/comments.png)
 
-### Tied of Ads or posts that Reddit thinks you may like? Me too.
+### Tired of Ads or posts that Reddit thinks you may like? Me too.
 
 This is a Reddit Aggregator that allows you to hardcode a list of subreddits that you're interested in. These can be added in the array within `api/index.js` called `SUBREDDITS` simply grab the subreddit name from the url and added it in there
 
